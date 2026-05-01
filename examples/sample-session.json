@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "meta": {
+    "url": "https://example.com/admin",
+    "title": "Admin Dashboard",
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+    "viewport": { "w": 1440, "h": 900 },
+    "started_ms": 1714534580000,
+    "ended_ms":   1714534825000,
+    "tool":       "annotator-bookmarklet/0.1"
+  },
+  "annotations": [
+    {
+      "id":           "a1",
+      "ts_offset_ms": 12500,
+      "tag":          "contrast",
+      "comment":      "Get-Started button label fails WCAG AA against the gradient (3.8:1 measured, need 4.5:1).",
+      "element": {
+        "outerHTML":     "<button class=\"cta\" data-tour=\"primary-cta\">Get Started</button>",
+        "selector":      "main > section.hero > div > button.cta",
+        "bbox":          { "x": 612, "y": 340, "w": 180, "h": 48 },
+        "computed_style_diff": {
+          "color":            "rgb(255, 255, 255)",
+          "background-image": "linear-gradient(45deg, rgb(139, 92, 246) 0%, rgb(6, 182, 212) 100%)",
+          "font-weight":      "600",
+          "padding":          "12px 24px",
+          "border-radius":    "8px"
+        },
+        "aria": { "role": "button", "aria-label": null }
+      }
+    },
+    {
+      "id":           "a2",
+      "ts_offset_ms": 84300,
+      "tag":          "alignment",
+      "comment":      "Sidebar section headings are 22px from the top of their group while every other group uses 16px. Off-grid.",
+      "element": {
+        "outerHTML":     "<h3 class=\"section-heading\">Recent Activity</h3>",
+        "selector":      "aside > nav > section:nth-child(3) > h3.section-heading",
+        "bbox":          { "x": 24, "y": 280, "w": 192, "h": 24 },
+        "computed_style_diff": {
+          "margin-top":  "22px",
+          "font-size":   "14px",
+          "color":       "rgb(161, 161, 166)"
+        },
+        "aria": { "role": null }
+      }
+    },
+    {
+      "id":           "a3",
+      "ts_offset_ms": 156800,
+      "tag":          "bug",
+      "comment":      "Filter dropdown closes on its own selector click but reopens immediately when blur fires from the input. Race condition?",
+      "element": {
+        "outerHTML":     "<div class=\"dropdown open\" role=\"listbox\" aria-label=\"Filter\">…",
+        "selector":      "[data-test=\"filter-dropdown\"]",
+        "bbox":          { "x": 920, "y": 120, "w": 240, "h": 320 },
+        "computed_style_diff": {
+          "position":   "absolute",
+          "z-index":    "999"
+        },
+        "aria": { "role": "listbox", "aria-label": "Filter" }
+      }
+    }
+  ],
+  "console_log": [
+    { "ts_offset_ms":   3100, "level": "warn",
+      "message": "[deprecation] window.openSync will be removed in v3.0; use window.openAsync." },
+    { "ts_offset_ms":  92400, "level": "info",
+      "message": "[router] navigated /admin/users → /admin/users?filter=engaged" }
+  ],
+  "errors": [
+    { "ts_offset_ms": 18900, "kind": "onerror",
+      "message": "Cannot read properties of undefined (reading 'length')",
+      "stack":   "TypeError: Cannot read properties of undefined (reading 'length')\n    at applyFilter (filter.js:84:22)\n    at HTMLButtonElement.<anonymous> (admin.js:217:9)" },
+    { "ts_offset_ms": 156800, "kind": "unhandledrejection",
+      "message": "AbortError: signal is aborted without reason",
+      "stack":   "" }
+  ],
+  "failed_requests": [
+    { "ts_offset_ms":  4500, "url": "/api/recommendations",
+      "method": "GET", "status": 500, "duration_ms": 1240 },
+    { "ts_offset_ms": 95200, "url": "/api/users?filter=engaged&page=2",
+      "method": "GET", "status": 0,   "duration_ms": 30000 }
+  ],
+  "csp_violations": [
+    { "ts_offset_ms": 12000, "directive": "script-src",
+      "blocked_uri": "https://untrusted.example.com/x.js",
+      "violated_directive": "script-src 'self'" }
+  ]
+}
