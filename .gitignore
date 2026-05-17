@@ -1,4 +1,13 @@
 node_modules/
-dist/
+# The canonical bookmarklet build artifact ships so operators
+# can use the tool without re-running tools/build-bookmarklet.py.
+# Pattern: ignore everything under dist/ EXCEPT the canonical
+# build artifact. Per git: re-including a file inside an
+# excluded directory requires excluding the directory's
+# contents (`dist/*`), not the directory itself (`dist/`).
+# Regenerate via `python3 tools/build-bookmarklet.py` after any
+# src/annotator.js edit; commit src + dist together.
+dist/*
+!dist/bookmarklet.js
 *.log
 .env
