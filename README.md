@@ -70,13 +70,38 @@ integration + Tauri shell are TODO.
 
 ```
 1. Open the page you want to audit.
-2. Paste the contents of `dist/bookmarklet.js` into a browser
-   bookmark URL prefixed with `javascript:`.
+2. Copy the entire contents of `dist/bookmarklet.js` (the file
+   already starts with `javascript:` — paste verbatim into a
+   browser bookmark URL field).
 3. Click the bookmark on the target page.
 4. The annotator panel appears bottom-right.
 5. Click "Pick" → click any element on the page → add a comment.
 6. Click "Save" → a `.json` file downloads with the captured session.
 ```
+
+### Building the bookmarklet
+
+`dist/bookmarklet.js` is generated from `src/annotator.js` (the
+single self-contained IIFE) via a small stdlib-only Python
+script. **No build dependencies** — no rollup, no webpack, no
+parcel, no Node. Just:
+
+```sh
+python3 tools/build-bookmarklet.py
+# → built dist/bookmarklet.js — N bytes (X% of 32 KB budget)
+```
+
+The script:
+- Strips standalone `//` line comments + collapses blank lines
+- URL-encodes per RFC 3986 unreserved
+- Prefixes `javascript:`
+- Warns + exits non-zero if size exceeds 32 KB (modern-browser
+  URL-bar budget floor)
+- Idempotent: same input → byte-identical output
+
+The committed `dist/bookmarklet.js` is the canonical build —
+re-run the script after any `src/annotator.js` change + commit
+both together.
 
 ## Quick use (annotator-relay, networked)
 
@@ -146,10 +171,13 @@ cargo test -p annotator-relay --test e2e_round_trip
   filesystem.
 - **Privacy-respectful.** Don't auto-post anywhere. Operator
   initiates the upload step explicitly.
-- **No build step for the bookmarklet shape.** `src/annotator.js` is
-  a single self-contained file. `dist/bookmarklet.js` is the
-  minified one-liner produced by a tiny shell script — no
-  rollup / webpack / parcel dependency tree.
+- **No build-dependency-tree for the bookmarklet.** `src/annotator.js`
+  is a single self-contained IIFE. `dist/bookmarklet.js` is the
+  URL-encoded `javascript:` form produced by
+  `tools/build-bookmarklet.py` — stdlib Python only, no rollup
+  / webpack / parcel / Node dependency tree. The committed
+  `dist/bookmarklet.js` is the canonical build; re-run the script
+  after any `src/annotator.js` change.
 - **Same captured-session shape across all three deployable shapes.**
   See `examples/sample-session.json`.
 
