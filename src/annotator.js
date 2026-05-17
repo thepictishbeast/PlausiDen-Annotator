@@ -326,14 +326,98 @@
   };
   document.getElementById('pa-save').onclick = function () {
     state.meta.ended_ms = Date.now();
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'annotator-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    const payload = JSON.stringify(state, null, 2);
+
+    // Optional relay: if the operator stored a relay URL in
+    // localStorage as `plausiden-annotator.relay-url`, POST the
+    // session there. Falls back to the file download UX if no
+    // relay is configured OR the POST fails (so a transient
+    // network blip doesn't lose the operator's captured session).
+    //
+    // Operator UX to set the relay:
+    //   localStorage.setItem('plausiden-annotator.relay-url', 'http://127.0.0.1:8788/sessions');
+    // Or trigger the prompt: Shift-click the Save button.
+    const relayUrl = window.localStorage.getItem(
+      'plausiden-annotator.relay-url',
+    );
+
+    function downloadAsFile() {
+      const blob = new Blob([payload], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'annotator-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    if (!relayUrl) {
+      downloadAsFile();
+      return;
+    }
+
+    // POST to relay. Same-origin failure or CORS reject → file
+    // fallback so the operator never loses captured data.
+    fetch(relayUrl, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error('relay HTTP ' + res.status);
+        }
+        return res.json().catch(function () {
+          // Relay returned non-JSON — still treat as success if 2xx.
+          return { ok: true };
+        });
+      })
+      .then(function (j) {
+        const id = (j && j.id) ? j.id : '(no id returned)';
+        const note = document.getElementById('pa-list');
+        if (note) {
+          note.insertAdjacentHTML(
+            'afterbegin',
+            '<div style="padding:4px 8px;background:hsl(146 60% 95%);border-left:3px solid hsl(146 60% 55%);font-size:11px;">relayed to ' +
+            relayUrl.replace(/</g, '&lt;') + ' → ' + String(id).replace(/</g, '&lt;') +
+            '</div>',
+          );
+        }
+      })
+      .catch(function (err) {
+        // Surface in the bookmarklet panel + fall back to download.
+        const note = document.getElementById('pa-list');
+        if (note) {
+          note.insertAdjacentHTML(
+            'afterbegin',
+            '<div style="padding:4px 8px;background:hsl(0 60% 95%);border-left:3px solid hsl(0 60% 55%);font-size:11px;">relay POST failed (' +
+            String(err.message || err).replace(/</g, '&lt;') +
+            ') — falling back to file download.</div>',
+          );
+        }
+        downloadAsFile();
+      });
   };
+
+  // Shift-click Save to (re)configure the relay URL inline.
+  document.getElementById('pa-save').addEventListener('click', function (e) {
+    if (!e.shiftKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const current = window.localStorage.getItem('plausiden-annotator.relay-url') || '';
+    const next = window.prompt(
+      'Annotator relay URL (empty to disable, POSTs JSON sessions):',
+      current,
+    );
+    if (next === null) return;
+    if (next.trim() === '') {
+      window.localStorage.removeItem('plausiden-annotator.relay-url');
+    } else {
+      window.localStorage.setItem('plausiden-annotator.relay-url', next.trim());
+    }
+  }, true);
 
   function promptForAnnotation(el) {
     // Tiny inline prompt — not a modal because the operator is
