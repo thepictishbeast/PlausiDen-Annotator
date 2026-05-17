@@ -183,12 +183,21 @@ cargo test -p annotator-relay --test e2e_round_trip
 
 ## Sibling integrations
 
-- **PlausiDen-Forge** *(planned: `phase_annotation_review`)*: a
-  Forge phase can poll the annotator-relay for sessions flagged
-  against the current build, surface findings as `Severity::Warn`
-  or `Strict` rows in the BuildReport. Closes the human-in-the-
-  loop gap between Forge audit (machine) and Annotator capture
-  (human).
+- **PlausiDen-Forge** *(`phase_annotation_review` shipping 2026-05-17)*:
+  the Forge phase reads `[review] session_dir = "..."` from
+  `forge.toml`, walks `*.json` sessions in that directory, and
+  surfaces every annotation as a Forge `Finding`. Severity mapping:
+  `a11y` / `contrast` / `bug` → `Severity::Strict` (production
+  builds fail when an operator has documented a real issue);
+  `alignment` / `copy` / `perf` / `suggestion` / `other` →
+  `Severity::Warn` (surface in poc-mode without blocking).
+  Unknown tags default to Warn for forward-compat with newer
+  schemas. Findings cluster per-page via `session.meta.url`. The
+  annotator-relay's storage root is the canonical input path. See
+  [`PlausiDen-Forge/crates/forge-phases/src/annotation_review.rs`](https://github.com/thepictishbeast/PlausiDen-Forge/blob/main/crates/forge-phases/src/annotation_review.rs)
+  for the implementation + 13-case test suite covering empty
+  session / multi-annotation / unknown-tag / missing-dir /
+  malformed-JSON paths.
 - **PlausiDen-Crawler**: the captured-session JSON is consumed by
   Crawler's `findings/` output format with one transform step.
 - **PlausiDen-Audits**: a session that flagged a real issue can be
