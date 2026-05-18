@@ -97,26 +97,23 @@
       const args = Array.prototype.slice.call(arguments);
       const url = (typeof args[0] === 'string') ? args[0] : (args[0] && args[0].url) || '';
       const method = (args[1] && args[1].method) || 'GET';
-      return origFetch.apply(window, args).then(function (resp) {
-        if (!resp.ok) {
-          state.failed_requests.push({
-            ts_offset_ms: tsOffset(),
-            url: url,
-            method: method,
-            status: resp.status,
-            duration_ms: Math.round(performance.now() - t0),
-          });
-        }
-        return resp;
-      }, function (err) {
+
+      const logFail = (status, error) => {
         state.failed_requests.push({
           ts_offset_ms: tsOffset(),
           url: url,
           method: method,
-          status: 0,
+          status: status,
           duration_ms: Math.round(performance.now() - t0),
-          error: String(err),
+          error: error
         });
+      };
+
+      return origFetch.apply(window, args).then(function (resp) {
+        if (!resp.ok) logFail(resp.status);
+        return resp;
+      }, function (err) {
+        logFail(0, String(err));
         throw err;
       });
     };
