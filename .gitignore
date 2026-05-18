@@ -11,3 +11,7 @@ dist/*
 !dist/bookmarklet.js
 *.log
 .env
+# Cargo build output (annotator-relay etc.). Surfaces as a dirty
+# `?? target/` in `git status` whenever someone runs cargo build
+# locally. Should never be committed.
+target/
