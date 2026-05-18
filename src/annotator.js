@@ -97,26 +97,23 @@
       const args = Array.prototype.slice.call(arguments);
       const url = (typeof args[0] === 'string') ? args[0] : (args[0] && args[0].url) || '';
       const method = (args[1] && args[1].method) || 'GET';
-      return origFetch.apply(window, args).then(function (resp) {
-        if (!resp.ok) {
-          state.failed_requests.push({
-            ts_offset_ms: tsOffset(),
-            url: url,
-            method: method,
-            status: resp.status,
-            duration_ms: Math.round(performance.now() - t0),
-          });
-        }
-        return resp;
-      }, function (err) {
+
+      const logFail = (status, error) => {
         state.failed_requests.push({
           ts_offset_ms: tsOffset(),
           url: url,
           method: method,
-          status: 0,
+          status: status,
           duration_ms: Math.round(performance.now() - t0),
-          error: String(err),
+          error: error
         });
+      };
+
+      return origFetch.apply(window, args).then(function (resp) {
+        if (!resp.ok) logFail(resp.status);
+        return resp;
+      }, function (err) {
+        logFail(0, String(err));
         throw err;
       });
     };
@@ -126,16 +123,18 @@
       list.getEntries().forEach(function (e) {
         // Only flag XHRs with non-2xx (PerformanceResourceTiming
         // doesn't always carry status; skip until reliable).
-        if (e.entryType === 'resource' && e.transferSize === 0 && e.duration > 5000) {
-          state.failed_requests.push({
-            ts_offset_ms: Math.round(e.startTime),
-            url: e.name,
-            method: 'unknown',
-            status: 0,
-            duration_ms: Math.round(e.duration),
-            error: 'slow / zero-byte resource',
-          });
-        }
+        if (e.entryType !== 'resource') return;
+        if (e.transferSize !== 0) return;
+        if (e.duration <= 5000) return;
+
+        state.failed_requests.push({
+          ts_offset_ms: Math.round(e.startTime),
+          url: e.name,
+          method: 'unknown',
+          status: 0,
+          duration_ms: Math.round(e.duration),
+          error: 'slow / zero-byte resource',
+        });
       });
     }).observe({ type: 'resource', buffered: true });
   } catch (e) { /* PerformanceObserver may be missing on some webviews */ }
@@ -356,6 +355,19 @@
       return;
     }
 
+    function addNote(kind, html) {
+      const note = document.getElementById('pa-list');
+      if (!note) return;
+      const theme = {
+        success: 'background:hsl(146 60% 95%);border-left:3px solid hsl(146 60% 55%)',
+        error: 'background:hsl(0 60% 95%);border-left:3px solid hsl(0 60% 55%)'
+      }[kind];
+      note.insertAdjacentHTML(
+        'afterbegin',
+        '<div style="padding:4px 8px;font-size:11px;' + theme + ';">' + html + '</div>'
+      );
+    }
+
     // POST to relay. Same-origin failure or CORS reject → file
     // fallback so the operator never loses captured data.
     fetch(relayUrl, {
@@ -376,27 +388,11 @@
       })
       .then(function (j) {
         const id = (j && j.id) ? j.id : '(no id returned)';
-        const note = document.getElementById('pa-list');
-        if (note) {
-          note.insertAdjacentHTML(
-            'afterbegin',
-            '<div style="padding:4px 8px;background:hsl(146 60% 95%);border-left:3px solid hsl(146 60% 55%);font-size:11px;">relayed to ' +
-            relayUrl.replace(/</g, '&lt;') + ' → ' + String(id).replace(/</g, '&lt;') +
-            '</div>',
-          );
-        }
+        addNote('success', 'relayed to ' + relayUrl.replace(/</g, '&lt;') + ' → ' + String(id).replace(/</g, '&lt;'));
       })
       .catch(function (err) {
         // Surface in the bookmarklet panel + fall back to download.
-        const note = document.getElementById('pa-list');
-        if (note) {
-          note.insertAdjacentHTML(
-            'afterbegin',
-            '<div style="padding:4px 8px;background:hsl(0 60% 95%);border-left:3px solid hsl(0 60% 55%);font-size:11px;">relay POST failed (' +
-            String(err.message || err).replace(/</g, '&lt;') +
-            ') — falling back to file download.</div>',
-          );
-        }
+        addNote('error', 'relay POST failed (' + String(err.message || err).replace(/</g, '&lt;') + ') — falling back to file download.');
         downloadAsFile();
       });
   };
