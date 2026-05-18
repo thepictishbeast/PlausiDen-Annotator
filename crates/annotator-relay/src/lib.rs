@@ -48,7 +48,7 @@ impl RelayState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RelayPostResponse {
     /// Session id assigned by the store. Echoed back so the
-    /// bookmarklet can surface "relayed → <id>" to the operator.
+    /// bookmarklet can surface `"relayed → <id>"` to the operator.
     pub id: SessionId,
     /// Bytes written to disk (after pretty-print). Lets the
     /// operator sanity-check the size.
