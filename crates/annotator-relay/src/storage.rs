@@ -121,6 +121,98 @@ impl SessionStore {
         let path = self.root.join(filename);
         Ok(fs::read(&path)?)
     }
+
+    /// Delete a single session by filename.
+    ///
+    /// Same path-traversal guard as [`Self::read_session`]; the
+    /// filename must NOT contain `/` / `\` / `..`. Returns
+    /// `Ok(())` on success, ENOENT-wrapped IoError if the file
+    /// was already gone (idempotent contract; downstream `DELETE`
+    /// handler maps ENOENT to HTTP 404 if the operator wants
+    /// strict semantics).
+    ///
+    /// ## Errors
+    ///
+    /// * `InvalidInput` if the filename contains path-traversal
+    ///   characters.
+    /// * Underlying I/O error from `fs::remove_file`.
+    pub fn delete_session(&self, filename: &str) -> Result<(), StoreError> {
+        if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+            return Err(StoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "filename contains path-traversal characters",
+            )));
+        }
+        let path = self.root.join(filename);
+        fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    /// Bulk-delete every session file whose ISO-8601 timestamp
+    /// prefix is older than `cutoff_days` days from now. Returns
+    /// the count of files actually removed.
+    ///
+    /// Filename grammar contract: produced by
+    /// `filename_stem_from` is `<RFC3339-with-colons-as-dashes>-<id>.json`.
+    /// This helper parses the prefix back to an OffsetDateTime
+    /// (re-substituting `-` → `:` in the time-of-day portion);
+    /// files that don't parse are SKIPPED, not removed, so a
+    /// hand-edited filename can never be wiped by a stale purge.
+    ///
+    /// ## Errors
+    ///
+    /// I/O error reading the store directory; individual
+    /// per-file deletion errors are accumulated into the
+    /// return-error if ANY file fails (the count reflects
+    /// successful deletions only).
+    pub fn purge_older_than(&self, cutoff_days: u32) -> Result<usize, StoreError> {
+        let now = time::OffsetDateTime::now_utc();
+        let cutoff = now - time::Duration::days(i64::from(cutoff_days));
+        let mut removed = 0usize;
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let name = match file_name.to_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            if !name.ends_with(".json") {
+                continue;
+            }
+            let Some(ts) = parse_timestamp_prefix(name) else {
+                continue;
+            };
+            if ts < cutoff {
+                fs::remove_file(entry.path())?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+}
+
+/// Parse the RFC-3339-derived timestamp prefix back to an
+/// OffsetDateTime. Filename shape:
+/// `2026-05-20T19-30-00Z-abcd1234.json`. We rebuild the canonical
+/// form by replacing the time-of-day `-` separators (positions
+/// 13 + 16, between the `T` and the `Z`) with `:`.
+fn parse_timestamp_prefix(filename: &str) -> Option<time::OffsetDateTime> {
+    // Expect at least "YYYY-MM-DDTHH-MM-SSZ-" = 21 chars.
+    if filename.len() < 21 {
+        return None;
+    }
+    let bytes = filename.as_bytes();
+    if bytes[10] != b'T' || bytes[19] != b'Z' {
+        return None;
+    }
+    // Replace dashes at indices 13 and 16 (between T and Z) by
+    // splicing — keep the ASCII-only invariant explicit so the
+    // crate-wide #![forbid(unsafe_code)] holds.
+    let head = &filename[..13];
+    let mid = &filename[14..16];
+    let tail = &filename[17..20];
+    let canonical = format!("{head}:{mid}:{tail}");
+    time::OffsetDateTime::parse(&canonical, &time::format_description::well_known::Rfc3339).ok()
 }
 
 /// Derive an 8-hex-char id from the SHA-256 of the payload. Same
@@ -294,5 +386,92 @@ mod tests {
         let f = store.list().unwrap().into_iter().next().unwrap();
         // ISO-8601-ish prefix → starts with 4-digit year.
         assert!(f.starts_with("20"), "filename {f} should start with year");
+    }
+
+    #[test]
+    fn delete_session_removes_file() {
+        let tmp = TempDir::new().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        store.write_session(&payload("x")).unwrap();
+        let f = store.list().unwrap().into_iter().next().unwrap();
+        store.delete_session(&f).unwrap();
+        assert!(
+            store.list().unwrap().is_empty(),
+            "store should be empty after delete"
+        );
+    }
+
+    #[test]
+    fn delete_session_rejects_path_traversal() {
+        let tmp = TempDir::new().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        let r = store.delete_session("../../etc/passwd");
+        assert!(matches!(r, Err(StoreError::Io(_))));
+    }
+
+    #[test]
+    fn delete_session_missing_file_surfaces_not_found() {
+        let tmp = TempDir::new().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        let r = store.delete_session("nope.json");
+        assert!(matches!(r, Err(StoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound));
+    }
+
+    #[test]
+    fn parse_timestamp_prefix_roundtrips_a_written_filename() {
+        // Write a session, then parse its filename back to a time.
+        let tmp = TempDir::new().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        store.write_session(&payload("x")).unwrap();
+        let f = store.list().unwrap().into_iter().next().unwrap();
+        let parsed = super::parse_timestamp_prefix(&f);
+        assert!(parsed.is_some(), "couldn't parse {f}");
+    }
+
+    #[test]
+    fn parse_timestamp_prefix_rejects_bad_shape() {
+        assert!(super::parse_timestamp_prefix("nope.json").is_none());
+        assert!(super::parse_timestamp_prefix("too-short.json").is_none());
+        // Missing the T and Z markers at the expected indices.
+        assert!(super::parse_timestamp_prefix("2026-05-20X19-30-00Y-abc.json").is_none());
+    }
+
+    #[test]
+    fn purge_older_than_removes_old_files_only() {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let tmp = TempDir::new().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        // Hand-craft a filename with a 2020 timestamp (very old).
+        let old_name = "2020-01-01T00-00-00Z-aaaaaaaa.json";
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(tmp.path().join(old_name))
+            .unwrap();
+        // And one with a 2099 timestamp (clearly NOT old).
+        let new_name = "2099-12-31T23-59-59Z-bbbbbbbb.json";
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(tmp.path().join(new_name))
+            .unwrap();
+        let removed = store.purge_older_than(30).unwrap();
+        assert_eq!(removed, 1);
+        let remaining = store.list().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0], new_name);
+    }
+
+    #[test]
+    fn purge_older_than_skips_unparseable_filenames() {
+        let tmp = TempDir::new().unwrap();
+        let store = SessionStore::open(tmp.path()).unwrap();
+        // Hand-edited filename without the expected shape.
+        std::fs::write(tmp.path().join("manual-edit.json"), b"{}").unwrap();
+        let removed = store.purge_older_than(0).unwrap();
+        assert_eq!(removed, 0, "unparseable filenames must NOT be purged");
+        assert_eq!(store.list().unwrap().len(), 1);
     }
 }

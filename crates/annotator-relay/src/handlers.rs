@@ -1,9 +1,10 @@
 //! HTTP handlers for the annotator-relay.
 //!
-//! Three routes:
-//!   POST /sessions          — bookmarklet uploads a session
-//!   GET  /sessions          — list stored sessions (filenames)
-//!   GET  /sessions/:name    — fetch one stored session
+//! Four routes:
+//!   POST   /sessions          — bookmarklet uploads a session
+//!   GET    /sessions          — list stored sessions (filenames)
+//!   GET    /sessions/:name    — fetch one stored session
+//!   DELETE /sessions/:name    — delete one stored session
 //!
 //! CORS is wide-open by design — the bookmarklet runs on the
 //! operator's target site (any origin) and POSTs to the local
@@ -25,7 +26,7 @@ use tower_http::cors::CorsLayer;
 pub fn router(state: RelayState) -> Router {
     Router::new()
         .route("/sessions", post(post_session).get(list_sessions))
-        .route("/sessions/:name", get(get_session))
+        .route("/sessions/:name", get(get_session).delete(delete_session))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -57,6 +58,15 @@ async fn get_session(
         bytes,
     )
         .into_response())
+}
+
+async fn delete_session(
+    State(state): State<RelayState>,
+    Path(name): Path<String>,
+) -> Result<StatusCode, RelayError> {
+    state.store.delete_session(&name)?;
+    tracing::info!(target: "annotator-relay", filename = %name, "session deleted");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Error wrapper that converts store errors into HTTP responses.
